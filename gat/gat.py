@@ -250,10 +250,7 @@ def main():
     argparser.add_argument("--plot-curves", action="store_true")
     args = argparser.parse_args()
 
-    if args.cpu:
-        device = th.device("cpu")
-    else:
-        device = th.device("cuda:%d" % args.gpu)
+    device = th.device("cuda:%d" % args.gpu) if th.cuda.is_available() else th.device("cpu")
 
     # load data
     data = DglNodePropPredDataset(name="ogbn-arxiv")

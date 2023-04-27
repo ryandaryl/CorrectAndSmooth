@@ -157,7 +157,7 @@ def pre_outcome_correlation(labels, model_out, label_idx):
     
     return y
 
-def general_outcome_correlation(adj, y, alpha, num_propagations, post_step, alpha_term, device='cuda', display=True):
+def general_outcome_correlation(adj, y, alpha, num_propagations, post_step, alpha_term, device, display=True):
     """general outcome correlation. alpha_term = True for outcome correlation, alpha_term = False for residual correlation"""
     adj = adj.to(device)
     orig_device = y.device
@@ -172,7 +172,7 @@ def general_outcome_correlation(adj, y, alpha, num_propagations, post_step, alph
         result = post_step(result)
     return result.to(orig_device)
 
-def label_propagation(data, split_idx, A, alpha, num_propagations, idxs):
+def label_propagation(data, split_idx, A, alpha, num_propagations, idxs, device):
     labels = data.y.data
     c = labels.max() + 1
     n = labels.shape[0]
@@ -181,9 +181,9 @@ def label_propagation(data, split_idx, A, alpha, num_propagations, idxs):
     y[label_idx] = F.one_hot(labels[label_idx],c).float().squeeze(1) 
 
 
-    return general_outcome_correlation(A, y, alpha, num_propagations, post_step=lambda x:torch.clamp(x,0,1), alpha_term=True)
+    return general_outcome_correlation(A, y, alpha, num_propagations, post_step=lambda x:torch.clamp(x,0,1), alpha_term=True, device=device)
 
-def double_correlation_autoscale(data, model_out, split_idx, A1, alpha1, num_propagations1, A2, alpha2, num_propagations2, scale=1.0, train_only=False, device='cuda', display=True):
+def double_correlation_autoscale(data, model_out, split_idx, A1, alpha1, num_propagations1, A2, alpha2, num_propagations2, device, scale=1.0, train_only=False, display=True):
     train_idx, valid_idx, test_idx = split_idx
     if train_only:
         label_idx = torch.cat([split_idx['train']])
@@ -208,7 +208,7 @@ def double_correlation_autoscale(data, model_out, split_idx, A1, alpha1, num_pro
     
     return res_result, result
 
-def double_correlation_fixed(data, model_out, split_idx, A1, alpha1, num_propagations1, A2, alpha2, num_propagations2, scale=1.0, train_only=False, device='cuda', display=True):
+def double_correlation_fixed(data, model_out, split_idx, A1, alpha1, num_propagations1, A2, alpha2, num_propagations2, device, scale=1.0, train_only=False, display=True):
     train_idx, valid_idx, test_idx = split_idx
     if train_only:
         label_idx = torch.cat([split_idx['train']])
@@ -236,7 +236,7 @@ def double_correlation_fixed(data, model_out, split_idx, A1, alpha1, num_propaga
     return res_result, result
 
 
-def only_outcome_correlation(data, model_out, split_idx, A, alpha, num_propagations, labels, device='cuda', display=True):
+def only_outcome_correlation(data, model_out, split_idx, A, alpha, num_propagations, labels, device, display=True):
     res_result = model_out.clone()
     label_idxs = get_labels_from_name(labels, split_idx)
     y = pre_outcome_correlation(labels=data.y.data, model_out=model_out, label_idx=label_idxs)

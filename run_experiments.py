@@ -21,7 +21,9 @@ def main():
     parser = argparse.ArgumentParser(description='Outcome Correlations)')
     parser.add_argument('--dataset', type=str)
     parser.add_argument('--method', type=str)
+    parser.add_argument('--device', type=str)
     args = parser.parse_args()
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
     
     dataset = PygNodePropPredDataset(name=f'ogbn-{args.dataset}')
     data = dataset[0]
@@ -149,7 +151,7 @@ def main():
     model_outs = glob.glob(f'models/{args.dataset}_{args.method}/*.pt')
     
     if args.method == 'lp':
-        out = label_propagation(data, split_idx, **lp_dict)
+        out = label_propagation(data, split_idx, device=device, **lp_dict)
         print('Valid acc: ', eval_test(out, split_idx['valid']))
         print('Test acc:', eval_test(out, split_idx['test']))
         return
