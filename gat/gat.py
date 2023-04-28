@@ -6,6 +6,7 @@ import math
 import time
 import os
 import shutil
+import datetime
 
 import numpy as np
 import torch as th
@@ -16,10 +17,10 @@ from matplotlib.ticker import AutoMinorLocator, MultipleLocator
 from ogb.nodeproppred import DglNodePropPredDataset, Evaluator
 from outcome_correlation import prepare_folder
 
-from models import GAT
+from models import GAT, GCN
 
 device = None
-in_feats, n_classes = None, None
+in_feats, n_classes, subgraph_size = None, None, None
 epsilon = 1 - math.log(2)
 
 
@@ -28,8 +29,8 @@ def gen_model(args):
 
     if args.use_labels:
         model = GAT(
-            in_feats + n_classes,
-            n_classes,
+            n_feats=in_feats + n_classes,
+            n_classes=n_classes,
             n_hidden=args.n_hidden,
             n_layers=args.n_layers,
             n_heads=args.n_heads,
@@ -39,16 +40,17 @@ def gen_model(args):
             norm=norm,
         )
     else:
-        model = GAT(
-            in_feats,
-            n_classes,
+        model = GCN(
+            in_feats=in_feats,
+            n_classes=n_classes,
             n_hidden=args.n_hidden,
             n_layers=args.n_layers,
-            n_heads=args.n_heads,
+            #n_heads=args.n_heads,
             activation=F.relu,
             dropout=args.dropout,
-            attn_drop=args.attn_drop,
-            norm=norm,
+            #attn_drop=args.attn_drop,
+            #norm=norm,
+            use_linear=False,
         )
 
     return model
@@ -94,10 +96,11 @@ def train(model, graph, labels, train_idx, optimizer, use_labels):
         mask = th.rand(train_idx.shape) < mask_rate
 
         train_pred_idx = train_idx[mask]
-
     optimizer.zero_grad()
-    pred = model(graph, feat)
-    loss = cross_entropy(pred[train_pred_idx], labels[train_pred_idx])
+    pred = model(graph.subgraph(range(subgraph_size)) if subgraph_size else graph, feat[:subgraph_size, :in_feats])
+    loss = cross_entropy(
+        pred[train_pred_idx.clip(0, subgraph_size - 1) if subgraph_size else train_pred_idx][:subgraph_size],
+        labels[train_pred_idx][:subgraph_size])
     loss.backward()
     optimizer.step()
 
@@ -112,7 +115,7 @@ def evaluate(model, graph, labels, train_idx, val_idx, test_idx, use_labels, eva
 
     if use_labels:
         feat = add_labels(feat, labels, train_idx)
-    pred = model(graph, feat)
+    pred = model(graph, feat[:, :in_feats])
     train_loss = cross_entropy(pred[train_idx], labels[train_idx])
     val_loss = cross_entropy(pred[val_idx], labels[val_idx])
     test_loss = cross_entropy(pred[test_idx], labels[test_idx])
@@ -145,12 +148,13 @@ def run(args, graph, labels, train_idx, val_idx, test_idx, evaluator, n_running)
     losses, train_losses, val_losses, test_losses = [], [], [], []
 
     for epoch in range(1, args.n_epochs + 1):
+        start_time = datetime.datetime.now()
         tic = time.time()
 
         adjust_learning_rate(optimizer, args.lr, epoch)
 
         loss, pred = train(model, graph, labels, train_idx, optimizer, args.use_labels)
-        acc = compute_acc(pred[train_idx], labels[train_idx], evaluator)
+        acc = compute_acc(pred[train_idx.clip(0, 99)], labels[train_idx], evaluator)
 
         train_acc, val_acc, test_acc, train_loss, val_loss, test_loss, out = evaluate(
             model, graph, labels, train_idx, val_idx, test_idx, args.use_labels, evaluator
@@ -178,6 +182,7 @@ def run(args, graph, labels, train_idx, val_idx, test_idx, evaluator, n_running)
             [acc, train_acc, val_acc, test_acc, loss.item(), train_loss, val_loss, test_loss],
         ):
             l.append(e)
+        print(datetime.datetime.now() - start_time)
 
     print("*" * 50)
     print(f"Average epoch time: {total_time / args.n_epochs}, Test acc: {best_test_acc}")
@@ -228,7 +233,7 @@ def count_parameters(args):
 
 
 def main():
-    global device, in_feats, n_classes, epsilon
+    global device, in_feats, subgraph_size, n_classes, epsilon
 
     argparser = argparse.ArgumentParser("GAT on OGBN-Arxiv", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     argparser.add_argument("--cpu", action="store_true", help="CPU mode. This option overrides --gpu.")
@@ -246,7 +251,7 @@ def main():
     argparser.add_argument("--dropout", type=float, default=0.75)
     argparser.add_argument("--attn_drop", type=float, default=0.05)
     argparser.add_argument("--wd", type=float, default=0)
-    argparser.add_argument("--log-every", type=int, default=20)
+    argparser.add_argument("--log-every", type=int, default=1)
     argparser.add_argument("--plot-curves", action="store_true")
     args = argparser.parse_args()
 
@@ -271,6 +276,7 @@ def main():
 
     in_feats = graph.ndata["feat"].shape[1]
     n_classes = (labels.max() + 1).item()
+    subgraph_size = None
     # graph.create_format_()
 
     train_idx = train_idx.to(device)
@@ -284,9 +290,9 @@ def main():
     test_accs = []
     model_dir = f'../models/arxiv_gat'
        
-    if os.path.exists(model_dir):
-        shutil.rmtree(model_dir)
-    os.makedirs(model_dir)
+    #if os.path.exists(model_dir):
+    #    shutil.rmtree(model_dir)
+    #os.makedirs(model_dir)
     with open(f'{model_dir}/metadata', 'w') as f:
         f.write(f'# of params: {sum(p.numel() for p in gen_model(args).parameters())}\n')
 
