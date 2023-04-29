@@ -154,7 +154,7 @@ def run(args, graph, labels, train_idx, val_idx, test_idx, evaluator, n_running)
         adjust_learning_rate(optimizer, args.lr, epoch)
 
         loss, pred = train(model, graph, labels, train_idx, optimizer, args.use_labels)
-        acc = compute_acc(pred[train_idx.clip(0, 99)], labels[train_idx], evaluator)
+        acc = compute_acc(pred[train_idx.clip(0, subgraph_size - 1) if subgraph_size else train_idx], labels[train_idx], evaluator)
 
         train_acc, val_acc, test_acc, train_loss, val_loss, test_loss, out = evaluate(
             model, graph, labels, train_idx, val_idx, test_idx, args.use_labels, evaluator
