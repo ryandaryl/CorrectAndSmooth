@@ -10,48 +10,83 @@ import datetime
 
 import numpy as np
 import torch as th
+import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+import dgl.nn.pytorch as dglnn
 from matplotlib import pyplot as plt
 from matplotlib.ticker import AutoMinorLocator, MultipleLocator
 from ogb.nodeproppred import DglNodePropPredDataset, Evaluator
-from outcome_correlation import prepare_folder
-
-from models import GAT, GCN
 
 device = None
 in_feats, n_classes, subgraph_size = None, None, None
 epsilon = 1 - math.log(2)
 
 
+class GCN(nn.Module):
+    def __init__(self, in_feats, n_hidden, n_classes, n_layers, activation, dropout, use_linear):
+        super().__init__()
+        self.n_layers = n_layers
+        self.n_hidden = n_hidden
+        self.n_classes = n_classes
+        self.use_linear = use_linear
+
+        self.convs = nn.ModuleList()
+        if use_linear:
+            self.linear = nn.ModuleList()
+        self.bns = nn.ModuleList()
+
+        for i in range(n_layers):
+            in_hidden = n_hidden if i > 0 else in_feats
+            out_hidden = n_hidden if i < n_layers - 1 else n_classes
+            bias = i == n_layers - 1
+
+            self.convs.append(dglnn.GraphConv(in_hidden, out_hidden, "both", bias=bias))
+            if use_linear:
+                self.linear.append(nn.Linear(in_hidden, out_hidden, bias=False))
+            if i < n_layers - 1:
+                self.bns.append(nn.BatchNorm1d(out_hidden))
+
+        self.dropout0 = nn.Dropout(min(0.1, dropout))
+        self.dropout = nn.Dropout(dropout)
+        self.activation = activation
+
+    def forward(self, graph, feat):
+        h = feat
+        h = self.dropout0(h)
+
+        for i in range(self.n_layers):
+            conv = self.convs[i](graph, h)
+
+            if self.use_linear:
+                linear = self.linear[i](h)
+                h = conv + linear
+            else:
+                h = conv
+
+            if i < self.n_layers - 1:
+                h = self.bns[i](h)
+                h = self.activation(h)
+                h = self.dropout(h)
+
+        return h
+
+
 def gen_model(args):
     norm = "both" if args.use_norm else "none"
 
-    if args.use_labels:
-        model = GAT(
-            n_feats=in_feats + n_classes,
-            n_classes=n_classes,
-            n_hidden=args.n_hidden,
-            n_layers=args.n_layers,
-            n_heads=args.n_heads,
-            activation=F.relu,
-            dropout=args.dropout,
-            attn_drop=args.attn_drop,
-            norm=norm,
-        )
-    else:
-        model = GCN(
-            in_feats=in_feats,
-            n_classes=n_classes,
-            n_hidden=args.n_hidden,
-            n_layers=args.n_layers,
-            #n_heads=args.n_heads,
-            activation=F.relu,
-            dropout=args.dropout,
-            #attn_drop=args.attn_drop,
-            #norm=norm,
-            use_linear=False,
-        )
+    model = GCN(
+        in_feats=in_feats,
+        n_classes=n_classes,
+        n_hidden=args.n_hidden,
+        n_layers=args.n_layers,
+        #n_heads=args.n_heads,
+        activation=F.relu,
+        dropout=args.dropout,
+        #attn_drop=args.attn_drop,
+        #norm=norm,
+        use_linear=False,
+    )
 
     return model
 
@@ -230,6 +265,17 @@ def count_parameters(args):
     model = gen_model(args)
     print([np.prod(p.size()) for p in model.parameters() if p.requires_grad])
     return sum([np.prod(p.size()) for p in model.parameters() if p.requires_grad])
+
+
+def prepare_folder(name, model):
+    model_dir = f'models/{name}'
+   
+    if os.path.exists(model_dir):
+        shutil.rmtree(model_dir)
+    os.makedirs(model_dir)
+    with open(f'{model_dir}/metadata', 'w') as f:
+        f.write(f'# of params: {sum(p.numel() for p in model.parameters())}\n')
+    return model_dir
 
 
 def main():
