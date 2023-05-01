@@ -157,63 +157,6 @@ def evaluate(model, graph, labels, train_idx, val_idx, test_idx, use_labels, eva
     )
 
 
-def run(n_epochs, lr, graph, use_labels, weight_decay, n_hidden, dropout, use_norm, n_layers, labels, train_idx, val_idx, test_idx, evaluator):
-    # define model and optimizer
-    model = gen_model(use_norm, n_hidden, n_layers, dropout)
-    print(count_parameters(use_norm, n_hidden, n_layers, dropout))
-    model = model.to(device)
-
-    optimizer = optim.RMSprop(model.parameters(), lr=lr, weight_decay=weight_decay)
-
-    # training loop
-    total_time = 0
-    best_val_acc, best_test_acc, best_val_loss = 0, 0, float("inf")
-    best_out = None
-
-    accs, train_accs, val_accs, test_accs = [], [], [], []
-    losses, train_losses, val_losses, test_losses = [], [], [], []
-
-    for epoch in range(1, n_epochs + 1):
-        start_time = datetime.datetime.now()
-        tic = time.time()
-
-        adjust_learning_rate(optimizer, lr, epoch)
-
-        loss, pred = train(model, graph, labels, train_idx, optimizer, use_labels)
-        acc = compute_acc(pred[train_idx.clip(0, subgraph_size - 1) if subgraph_size else train_idx], labels[train_idx], evaluator)
-
-        train_acc, val_acc, test_acc, train_loss, val_loss, test_loss, out = evaluate(
-            model, graph, labels, train_idx, val_idx, test_idx, use_labels, evaluator
-        )
-
-        toc = time.time()
-        total_time += toc - tic
-
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
-            best_val_acc = val_acc
-            best_test_acc = test_acc
-            best_out = out
-
-        print(
-            f"Loss: {loss.item():.4f}, Acc: {acc:.4f}\n"
-            f"Train/Val/Test loss: {train_loss:.4f}/{val_loss:.4f}/{test_loss:.4f}\n"
-            f"Train/Val/Test/Best val/Best test acc: {train_acc:.4f}/{val_acc:.4f}/{test_acc:.4f}/{best_val_acc:.4f}/{best_test_acc:.4f}"
-        )
-
-        for l, e in zip(
-            [accs, train_accs, val_accs, test_accs, losses, train_losses, val_losses, test_losses],
-            [acc, train_acc, val_acc, test_acc, loss.item(), train_loss, val_loss, test_loss],
-        ):
-            l.append(e)
-        print(datetime.datetime.now() - start_time)
-
-    print("*" * 50)
-    print(f"Average epoch time: {total_time / n_epochs}, Test acc: {best_test_acc}")
-
-    return best_val_acc, best_test_acc, best_out
-
-
 def count_parameters(use_norm, n_hidden, n_layers, dropout):
     model = gen_model(use_norm, n_hidden, n_layers, dropout)
     print([np.prod(p.size()) for p in model.parameters() if p.requires_grad])
@@ -279,7 +222,60 @@ def main():
     with open(f'{model_dir}/metadata', 'w') as f:
         f.write(f'# of params: {sum(p.numel() for p in gen_model(use_norm, n_hidden, n_layers, dropout).parameters())}\n')
 
-    val_acc, test_acc, out = run(n_epochs, lr, graph, use_labels, weight_decay, n_hidden, dropout, use_norm, n_layers, labels, train_idx, val_idx, test_idx, evaluator)
+    model = gen_model(use_norm, n_hidden, n_layers, dropout)
+    print(count_parameters(use_norm, n_hidden, n_layers, dropout))
+    model = model.to(device)
+
+    optimizer = optim.RMSprop(model.parameters(), lr=lr, weight_decay=weight_decay)
+
+    # training loop
+    total_time = 0
+    best_val_acc, best_test_acc, best_val_loss = 0, 0, float("inf")
+    best_out = None
+
+    accs, train_accs, val_accs, test_accs = [], [], [], []
+    losses, train_losses, val_losses, test_losses = [], [], [], []
+
+    for epoch in range(1, n_epochs + 1):
+        start_time = datetime.datetime.now()
+        tic = time.time()
+
+        adjust_learning_rate(optimizer, lr, epoch)
+
+        loss, pred = train(model, graph, labels, train_idx, optimizer, use_labels)
+        acc = compute_acc(pred[train_idx.clip(0, subgraph_size - 1) if subgraph_size else train_idx], labels[train_idx], evaluator)
+
+        train_acc, val_acc, test_acc, train_loss, val_loss, test_loss, out = evaluate(
+            model, graph, labels, train_idx, val_idx, test_idx, use_labels, evaluator
+        )
+
+        toc = time.time()
+        total_time += toc - tic
+
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            best_val_acc = val_acc
+            best_test_acc = test_acc
+            best_out = out
+
+        print(
+            f"{epoch=}\n"
+            f"Loss: {loss.item():.4f}, Acc: {acc:.4f}\n"
+            f"Train/Val/Test loss: {train_loss:.4f}/{val_loss:.4f}/{test_loss:.4f}\n"
+            f"Train/Val/Test/Best val/Best test acc: {train_acc:.4f}/{val_acc:.4f}/{test_acc:.4f}/{best_val_acc:.4f}/{best_test_acc:.4f}"
+        )
+
+        for l, e in zip(
+            [accs, train_accs, val_accs, test_accs, losses, train_losses, val_losses, test_losses],
+            [acc, train_acc, val_acc, test_acc, loss.item(), train_loss, val_loss, test_loss],
+        ):
+            l.append(e)
+        print(datetime.datetime.now() - start_time)
+
+    print("*" * 50)
+    print(f"Average epoch time: {total_time / n_epochs}, Test acc: {best_test_acc}")
+    val_acc, test_acc, out = best_val_acc, best_test_acc, best_out
+
     val_accs.append(val_acc)
     test_accs.append(test_acc)
     th.save(F.softmax(out, dim=1), f'{model_dir}/{i-1}.pt')
