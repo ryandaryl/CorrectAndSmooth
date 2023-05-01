@@ -1,7 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-
-import argparse
 import math
 import time
 import os
@@ -72,22 +68,17 @@ class GCN(nn.Module):
         return h
 
 
-def gen_model(args):
-    norm = "both" if args.use_norm else "none"
-
+def gen_model(use_norm, n_hidden, n_layers, dropout):
+    norm = "both" if use_norm else "none"
     model = GCN(
         in_feats=in_feats,
         n_classes=n_classes,
-        n_hidden=args.n_hidden,
-        n_layers=args.n_layers,
-        #n_heads=args.n_heads,
+        n_hidden=n_hidden,
+        n_layers=n_layers,
         activation=F.relu,
-        dropout=args.dropout,
-        #attn_drop=args.attn_drop,
-        #norm=norm,
+        dropout=dropout,
         use_linear=False,
     )
-
     return model
 
 
@@ -166,13 +157,13 @@ def evaluate(model, graph, labels, train_idx, val_idx, test_idx, use_labels, eva
     )
 
 
-def run(args, graph, labels, train_idx, val_idx, test_idx, evaluator, n_running):
+def run(n_epochs, lr, graph, use_labels, weight_decay, n_hidden, dropout, use_norm, n_layers, labels, train_idx, val_idx, test_idx, evaluator):
     # define model and optimizer
-    model = gen_model(args)
-    print(count_parameters(args))
+    model = gen_model(use_norm, n_hidden, n_layers, dropout)
+    print(count_parameters(use_norm, n_hidden, n_layers, dropout))
     model = model.to(device)
 
-    optimizer = optim.RMSprop(model.parameters(), lr=args.lr, weight_decay=args.wd)
+    optimizer = optim.RMSprop(model.parameters(), lr=lr, weight_decay=weight_decay)
 
     # training loop
     total_time = 0
@@ -182,17 +173,17 @@ def run(args, graph, labels, train_idx, val_idx, test_idx, evaluator, n_running)
     accs, train_accs, val_accs, test_accs = [], [], [], []
     losses, train_losses, val_losses, test_losses = [], [], [], []
 
-    for epoch in range(1, args.n_epochs + 1):
+    for epoch in range(1, n_epochs + 1):
         start_time = datetime.datetime.now()
         tic = time.time()
 
-        adjust_learning_rate(optimizer, args.lr, epoch)
+        adjust_learning_rate(optimizer, lr, epoch)
 
-        loss, pred = train(model, graph, labels, train_idx, optimizer, args.use_labels)
+        loss, pred = train(model, graph, labels, train_idx, optimizer, use_labels)
         acc = compute_acc(pred[train_idx.clip(0, subgraph_size - 1) if subgraph_size else train_idx], labels[train_idx], evaluator)
 
         train_acc, val_acc, test_acc, train_loss, val_loss, test_loss, out = evaluate(
-            model, graph, labels, train_idx, val_idx, test_idx, args.use_labels, evaluator
+            model, graph, labels, train_idx, val_idx, test_idx, use_labels, evaluator
         )
 
         toc = time.time()
@@ -204,13 +195,11 @@ def run(args, graph, labels, train_idx, val_idx, test_idx, evaluator, n_running)
             best_test_acc = test_acc
             best_out = out
 
-        if epoch % args.log_every == 0:
-            print(f"Run: {n_running}/{args.n_runs}, Epoch: {epoch}/{args.n_epochs}")
-            print(
-                f"Loss: {loss.item():.4f}, Acc: {acc:.4f}\n"
-                f"Train/Val/Test loss: {train_loss:.4f}/{val_loss:.4f}/{test_loss:.4f}\n"
-                f"Train/Val/Test/Best val/Best test acc: {train_acc:.4f}/{val_acc:.4f}/{test_acc:.4f}/{best_val_acc:.4f}/{best_test_acc:.4f}"
-            )
+        print(
+            f"Loss: {loss.item():.4f}, Acc: {acc:.4f}\n"
+            f"Train/Val/Test loss: {train_loss:.4f}/{val_loss:.4f}/{test_loss:.4f}\n"
+            f"Train/Val/Test/Best val/Best test acc: {train_acc:.4f}/{val_acc:.4f}/{test_acc:.4f}/{best_val_acc:.4f}/{best_test_acc:.4f}"
+        )
 
         for l, e in zip(
             [accs, train_accs, val_accs, test_accs, losses, train_losses, val_losses, test_losses],
@@ -220,49 +209,13 @@ def run(args, graph, labels, train_idx, val_idx, test_idx, evaluator, n_running)
         print(datetime.datetime.now() - start_time)
 
     print("*" * 50)
-    print(f"Average epoch time: {total_time / args.n_epochs}, Test acc: {best_test_acc}")
-
-    if args.plot_curves:
-        fig = plt.figure(figsize=(24, 24))
-        ax = fig.gca()
-        ax.set_xticks(np.arange(0, args.n_epochs, 100))
-        ax.set_yticks(np.linspace(0, 1.0, 101))
-        ax.tick_params(labeltop=True, labelright=True)
-        for y, label in zip([accs, train_accs, val_accs, test_accs], ["acc", "train acc", "val acc", "test acc"]):
-            plt.plot(range(args.n_epochs), y, label=label)
-        ax.xaxis.set_major_locator(MultipleLocator(100))
-        ax.xaxis.set_minor_locator(AutoMinorLocator(1))
-        ax.yaxis.set_major_locator(MultipleLocator(0.01))
-        ax.yaxis.set_minor_locator(AutoMinorLocator(2))
-        plt.grid(which="major", color="red", linestyle="dotted")
-        plt.grid(which="minor", color="orange", linestyle="dotted")
-        plt.legend()
-        plt.tight_layout()
-        plt.savefig(f"gat_acc_{n_running}.png")
-
-        fig = plt.figure(figsize=(24, 24))
-        ax = fig.gca()
-        ax.set_xticks(np.arange(0, args.n_epochs, 100))
-        ax.tick_params(labeltop=True, labelright=True)
-        for y, label in zip(
-            [losses, train_losses, val_losses, test_losses], ["loss", "train loss", "val loss", "test loss"]
-        ):
-            plt.plot(range(args.n_epochs), y, label=label)
-        ax.xaxis.set_major_locator(MultipleLocator(100))
-        ax.xaxis.set_minor_locator(AutoMinorLocator(1))
-        ax.yaxis.set_major_locator(MultipleLocator(0.1))
-        ax.yaxis.set_minor_locator(AutoMinorLocator(5))
-        plt.grid(which="major", color="red", linestyle="dotted")
-        plt.grid(which="minor", color="orange", linestyle="dotted")
-        plt.legend()
-        plt.tight_layout()
-        plt.savefig(f"gat_loss_{n_running}.png")
+    print(f"Average epoch time: {total_time / n_epochs}, Test acc: {best_test_acc}")
 
     return best_val_acc, best_test_acc, best_out
 
 
-def count_parameters(args):
-    model = gen_model(args)
+def count_parameters(use_norm, n_hidden, n_layers, dropout):
+    model = gen_model(use_norm, n_hidden, n_layers, dropout)
     print([np.prod(p.size()) for p in model.parameters() if p.requires_grad])
     return sum([np.prod(p.size()) for p in model.parameters() if p.requires_grad])
 
@@ -281,27 +234,15 @@ def prepare_folder(name, model):
 def main():
     global device, in_feats, subgraph_size, n_classes, epsilon
 
-    argparser = argparse.ArgumentParser("GAT on OGBN-Arxiv", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    argparser.add_argument("--cpu", action="store_true", help="CPU mode. This option overrides --gpu.")
-    argparser.add_argument("--gpu", type=int, default=0, help="GPU device ID.")
-    argparser.add_argument("--n-runs", type=int, default=10)
-    argparser.add_argument("--n-epochs", type=int, default=2000)
-    argparser.add_argument(
-        "--use-labels", action="store_true", help="Use labels in the training set as input features."
-    )
-    argparser.add_argument("--use-norm", action="store_true", help="Use symmetrically normalized adjacency matrix.")
-    argparser.add_argument("--lr", type=float, default=0.002)
-    argparser.add_argument("--n-layers", type=int, default=3)
-    argparser.add_argument("--n-heads", type=int, default=3)
-    argparser.add_argument("--n-hidden", type=int, default=256)
-    argparser.add_argument("--dropout", type=float, default=0.75)
-    argparser.add_argument("--attn_drop", type=float, default=0.05)
-    argparser.add_argument("--wd", type=float, default=0)
-    argparser.add_argument("--log-every", type=int, default=1)
-    argparser.add_argument("--plot-curves", action="store_true")
-    args = argparser.parse_args()
-
-    device = th.device("cuda:%d" % args.gpu) if th.cuda.is_available() else th.device("cpu")
+    device = th.device("cuda:0" if th.cuda.is_available() else th.device("cpu"))
+    n_epochs = 100
+    lr = 0.002
+    n_layers = 3
+    use_labels = False
+    use_norm = True
+    weight_decay = 0
+    n_hidden = 256
+    dropout = 0.75
 
     # load data
     data = DglNodePropPredDataset(name="ogbn-arxiv")
@@ -311,12 +252,8 @@ def main():
     train_idx, val_idx, test_idx = splitted_idx["train"], splitted_idx["valid"], splitted_idx["test"]
     graph, labels = data[0]
 
-    # add reverse edges
     srcs, dsts = graph.all_edges()
     graph.add_edges(dsts, srcs)
-
-    # add self-loop
-    print(f"Total edges before adding self-loop {graph.number_of_edges()}")
     graph = graph.remove_self_loop().add_self_loop()
     print(f"Total edges after adding self-loop {graph.number_of_edges()}")
 
@@ -340,29 +277,20 @@ def main():
     #    shutil.rmtree(model_dir)
     #os.makedirs(model_dir)
     with open(f'{model_dir}/metadata', 'w') as f:
-        f.write(f'# of params: {sum(p.numel() for p in gen_model(args).parameters())}\n')
+        f.write(f'# of params: {sum(p.numel() for p in gen_model(use_norm, n_hidden, n_layers, dropout).parameters())}\n')
 
-    for i in range(1, args.n_runs + 1):
-        val_acc, test_acc, out = run(args, graph, labels, train_idx, val_idx, test_idx, evaluator, i)
-        val_accs.append(val_acc)
-        test_accs.append(test_acc)
-        th.save(F.softmax(out, dim=1), f'{model_dir}/{i-1}.pt')
+    val_acc, test_acc, out = run(n_epochs, lr, graph, use_labels, weight_decay, n_hidden, dropout, use_norm, n_layers, labels, train_idx, val_idx, test_idx, evaluator)
+    val_accs.append(val_acc)
+    test_accs.append(test_acc)
+    th.save(F.softmax(out, dim=1), f'{model_dir}/{i-1}.pt')
 
     print(f"Runned {args.n_runs} times")
     print("Val Accs:", val_accs)
     print("Test Accs:", test_accs)
     print(f"Average val accuracy: {np.mean(val_accs)} ± {np.std(val_accs)}")
     print(f"Average test accuracy: {np.mean(test_accs)} ± {np.std(test_accs)}")
-    print(f"Number of params: {count_parameters(args)}")
+    print(f"Number of params: {count_parameters(use_norm, n_hidden, n_layers, dropout)}")
 
 
 if __name__ == "__main__":
     main()
-
-
-# Runned 10 times
-# Val Accs: [0.7505956575724018, 0.7489177489177489, 0.7502600758414711, 0.7498573777643545, 0.75079700661096, 0.7504278667069365, 0.7505285412262156, 0.7512332628611699, 0.7503271921876573, 0.750729890264774]
-# Test Accs: [0.7374853404110857, 0.7357982017570932, 0.7359216509268975, 0.736826944838796, 0.7385140834927885, 0.7370944180400387, 0.7358187766187272, 0.7365183219142851, 0.7343168117194412, 0.7371767174865749]
-# Average val accuracy: 0.750367461995369 ± 0.0005934770264509258
-# Average test accuracy: 0.7365471267205728 ± 0.0010945826389317434
-# Number of params: 1628440
