@@ -5,7 +5,7 @@ import shutil
 import datetime
 
 import numpy as np
-import torch as th
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
@@ -68,40 +68,14 @@ class GCN(nn.Module):
         return h
 
 
-def gen_model(use_norm, n_hidden, n_layers, dropout):
-    norm = "both" if use_norm else "none"
-    model = GCN(
-        in_feats=in_feats,
-        n_classes=n_classes,
-        n_hidden=n_hidden,
-        n_layers=n_layers,
-        activation=F.relu,
-        dropout=dropout,
-        use_linear=False,
-    )
-    return model
-
-
 def cross_entropy(x, labels):
     y = F.cross_entropy(x, labels[:, 0], reduction="none")
-    y = th.log(epsilon + y) - math.log(epsilon)
-    return th.mean(y)
+    y = torch.log(epsilon + y) - math.log(epsilon)
+    return torch.mean(y)
 
 
 def compute_acc(pred, labels, evaluator):
     return evaluator.eval({"y_pred": pred.argmax(dim=-1, keepdim=True), "y_true": labels})["acc"]
-
-
-def add_labels(feat, labels, idx):
-    onehot = th.zeros([feat.shape[0], n_classes]).to(device)
-    onehot[idx, labels[idx, 0]] = 1
-    return th.cat([feat, onehot], dim=-1)
-
-
-def adjust_learning_rate(optimizer, lr, epoch):
-    if epoch <= 50:
-        for param_group in optimizer.param_groups:
-            param_group["lr"] = lr * epoch / 50
 
 
 def train(model, graph, labels, train_idx, optimizer, use_labels):
@@ -111,7 +85,7 @@ def train(model, graph, labels, train_idx, optimizer, use_labels):
 
     if use_labels:
         mask_rate = 0.5
-        mask = th.rand(train_idx.shape) < mask_rate
+        mask = torch.rand(train_idx.shape) < mask_rate
 
         train_labels_idx = train_idx[mask]
         train_pred_idx = train_idx[~mask]
@@ -119,7 +93,7 @@ def train(model, graph, labels, train_idx, optimizer, use_labels):
         feat = add_labels(feat, labels, train_labels_idx)
     else:
         mask_rate = 0.5
-        mask = th.rand(train_idx.shape) < mask_rate
+        mask = torch.rand(train_idx.shape) < mask_rate
 
         train_pred_idx = train_idx[mask]
     optimizer.zero_grad()
@@ -133,14 +107,17 @@ def train(model, graph, labels, train_idx, optimizer, use_labels):
     return loss, pred
 
 
-@th.no_grad()
+@torch.no_grad()
 def evaluate(model, graph, labels, train_idx, val_idx, test_idx, use_labels, evaluator):
+
     model.eval()
 
     feat = graph.ndata["feat"]
 
     if use_labels:
-        feat = add_labels(feat, labels, train_idx)
+        onehot = torch.zeros([feat.shape[0], n_classes]).to(device)
+        onehot[train_idx, labels[train_idx, 0]] = 1
+        feat = torch.cat([feat, onehot], dim=-1)
     pred = model(graph, feat[:, :in_feats])
     train_loss = cross_entropy(pred[train_idx], labels[train_idx])
     val_loss = cross_entropy(pred[val_idx], labels[val_idx])
@@ -157,27 +134,10 @@ def evaluate(model, graph, labels, train_idx, val_idx, test_idx, use_labels, eva
     )
 
 
-def count_parameters(use_norm, n_hidden, n_layers, dropout):
-    model = gen_model(use_norm, n_hidden, n_layers, dropout)
-    print([np.prod(p.size()) for p in model.parameters() if p.requires_grad])
-    return sum([np.prod(p.size()) for p in model.parameters() if p.requires_grad])
-
-
-def prepare_folder(name, model):
-    model_dir = f'models/{name}'
-   
-    if os.path.exists(model_dir):
-        shutil.rmtree(model_dir)
-    os.makedirs(model_dir)
-    with open(f'{model_dir}/metadata', 'w') as f:
-        f.write(f'# of params: {sum(p.numel() for p in model.parameters())}\n')
-    return model_dir
-
-
 def main():
     global device, in_feats, subgraph_size, n_classes, epsilon
 
-    device = th.device("cuda:0" if th.cuda.is_available() else th.device("cpu"))
+    device = torch.device("cuda:0" if torch.cuda.is_available() else torch.device("cpu"))
     n_epochs = 100
     lr = 0.002
     n_layers = 3
@@ -192,8 +152,8 @@ def main():
     evaluator = Evaluator(name="ogbn-arxiv")
 
     splitted_idx = data.get_idx_split()
-    train_idx, val_idx, test_idx = splitted_idx["train"], splitted_idx["valid"], splitted_idx["test"]
-    graph, labels = data[0]
+    train_idx, val_idx, test_idx = [splitted_idx[k].to(device) for k in ["train", "valid", "test"]]
+    graph, labels = [tensor_data.to(device) for tensor_data in data[0]]
 
     srcs, dsts = graph.all_edges()
     graph.add_edges(dsts, srcs)
@@ -203,27 +163,23 @@ def main():
     in_feats = graph.ndata["feat"].shape[1]
     n_classes = (labels.max() + 1).item()
     subgraph_size = None
-    # graph.create_format_()
-
-    train_idx = train_idx.to(device)
-    val_idx = val_idx.to(device)
-    test_idx = test_idx.to(device)
-    labels = labels.to(device)
-    graph = graph.to(device)
 
     # run
     val_accs = []
     test_accs = []
     model_dir = f'../models/arxiv_gat'
-       
-    #if os.path.exists(model_dir):
-    #    shutil.rmtree(model_dir)
-    #os.makedirs(model_dir)
-    with open(f'{model_dir}/metadata', 'w') as f:
-        f.write(f'# of params: {sum(p.numel() for p in gen_model(use_norm, n_hidden, n_layers, dropout).parameters())}\n')
 
-    model = gen_model(use_norm, n_hidden, n_layers, dropout)
-    print(count_parameters(use_norm, n_hidden, n_layers, dropout))
+    model = GCN(
+        in_feats=in_feats,
+        n_classes=n_classes,
+        n_hidden=n_hidden,
+        n_layers=n_layers,
+        activation=F.relu,
+        dropout=dropout,
+        use_linear=False,
+    )
+    print([np.prod(p.size()) for p in model.parameters() if p.requires_grad])
+    print(sum([np.prod(p.size()) for p in model.parameters() if p.requires_grad]))
     model = model.to(device)
 
     optimizer = optim.RMSprop(model.parameters(), lr=lr, weight_decay=weight_decay)
@@ -238,9 +194,10 @@ def main():
 
     for epoch in range(1, n_epochs + 1):
         start_time = datetime.datetime.now()
-        tic = time.time()
 
-        adjust_learning_rate(optimizer, lr, epoch)
+        if epoch <= 50:
+            for param_group in optimizer.param_groups:
+                param_group["lr"] = lr * epoch / 50
 
         loss, pred = train(model, graph, labels, train_idx, optimizer, use_labels)
         acc = compute_acc(pred[train_idx.clip(0, subgraph_size - 1) if subgraph_size else train_idx], labels[train_idx], evaluator)
@@ -248,9 +205,6 @@ def main():
         train_acc, val_acc, test_acc, train_loss, val_loss, test_loss, out = evaluate(
             model, graph, labels, train_idx, val_idx, test_idx, use_labels, evaluator
         )
-
-        toc = time.time()
-        total_time += toc - tic
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
@@ -264,28 +218,7 @@ def main():
             f"Train/Val/Test loss: {train_loss:.4f}/{val_loss:.4f}/{test_loss:.4f}\n"
             f"Train/Val/Test/Best val/Best test acc: {train_acc:.4f}/{val_acc:.4f}/{test_acc:.4f}/{best_val_acc:.4f}/{best_test_acc:.4f}"
         )
-
-        for l, e in zip(
-            [accs, train_accs, val_accs, test_accs, losses, train_losses, val_losses, test_losses],
-            [acc, train_acc, val_acc, test_acc, loss.item(), train_loss, val_loss, test_loss],
-        ):
-            l.append(e)
         print(datetime.datetime.now() - start_time)
-
-    print("*" * 50)
-    print(f"Average epoch time: {total_time / n_epochs}, Test acc: {best_test_acc}")
-    val_acc, test_acc, out = best_val_acc, best_test_acc, best_out
-
-    val_accs.append(val_acc)
-    test_accs.append(test_acc)
-    th.save(F.softmax(out, dim=1), f'{model_dir}/{i-1}.pt')
-
-    print(f"Runned {args.n_runs} times")
-    print("Val Accs:", val_accs)
-    print("Test Accs:", test_accs)
-    print(f"Average val accuracy: {np.mean(val_accs)} ± {np.std(val_accs)}")
-    print(f"Average test accuracy: {np.mean(test_accs)} ± {np.std(test_accs)}")
-    print(f"Number of params: {count_parameters(use_norm, n_hidden, n_layers, dropout)}")
 
 
 if __name__ == "__main__":
