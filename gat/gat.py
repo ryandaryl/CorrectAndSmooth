@@ -142,17 +142,15 @@ def main():
     lr = 0.002
     n_layers = 3
     use_labels = False
-    use_norm = True
     weight_decay = 0
     n_hidden = 256
     dropout = 0.75
 
-    # load data
     data = DglNodePropPredDataset(name="ogbn-arxiv")
     evaluator = Evaluator(name="ogbn-arxiv")
 
-    splitted_idx = data.get_idx_split()
-    train_idx, val_idx, test_idx = [splitted_idx[k].to(device) for k in ["train", "valid", "test"]]
+    split_idx = data.get_idx_split()
+    train_idx, val_idx, test_idx = [split_idx[k].to(device) for k in ["train", "valid", "test"]]
     graph, labels = [tensor_data.to(device) for tensor_data in data[0]]
 
     srcs, dsts = graph.all_edges()
@@ -163,11 +161,6 @@ def main():
     in_feats = graph.ndata["feat"].shape[1]
     n_classes = (labels.max() + 1).item()
     subgraph_size = None
-
-    # run
-    val_accs = []
-    test_accs = []
-    model_dir = f'../models/arxiv_gat'
 
     model = GCN(
         in_feats=in_feats,
@@ -184,13 +177,7 @@ def main():
 
     optimizer = optim.RMSprop(model.parameters(), lr=lr, weight_decay=weight_decay)
 
-    # training loop
-    total_time = 0
     best_val_acc, best_test_acc, best_val_loss = 0, 0, float("inf")
-    best_out = None
-
-    accs, train_accs, val_accs, test_accs = [], [], [], []
-    losses, train_losses, val_losses, test_losses = [], [], [], []
 
     for epoch in range(1, n_epochs + 1):
         start_time = datetime.datetime.now()
@@ -210,7 +197,6 @@ def main():
             best_val_loss = val_loss
             best_val_acc = val_acc
             best_test_acc = test_acc
-            best_out = out
 
         print(
             f"{epoch=}\n"
