@@ -14,8 +14,7 @@ from matplotlib import pyplot as plt
 from matplotlib.ticker import AutoMinorLocator, MultipleLocator
 from ogb.nodeproppred import DglNodePropPredDataset, Evaluator
 
-device = None
-in_feats, n_classes, subgraph_size = None, None, None
+n_classes, subgraph_size = None, None
 epsilon = 1 - math.log(2)
 
 
@@ -97,7 +96,7 @@ def train(model, graph, labels, train_idx, optimizer, use_labels):
 
         train_pred_idx = train_idx[mask]
     optimizer.zero_grad()
-    pred = model(graph.subgraph(range(subgraph_size)) if subgraph_size else graph, feat[:subgraph_size, :in_feats])
+    pred = model(graph.subgraph(range(subgraph_size)) if subgraph_size else graph, feat[:subgraph_size])
     loss = cross_entropy(
         pred[train_pred_idx.clip(0, subgraph_size - 1) if subgraph_size else train_pred_idx][:subgraph_size],
         labels[train_pred_idx][:subgraph_size])
@@ -108,35 +107,20 @@ def train(model, graph, labels, train_idx, optimizer, use_labels):
 
 
 @torch.no_grad()
-def evaluate(model, graph, labels, train_idx, val_idx, test_idx, use_labels, evaluator):
-
+def evaluate(model, graph, labels, train_idx, val_idx, test_idx, use_labels, evaluator, device):
     model.eval()
-
     feat = graph.ndata["feat"]
-
     if use_labels:
         onehot = torch.zeros([feat.shape[0], n_classes]).to(device)
         onehot[train_idx, labels[train_idx, 0]] = 1
         feat = torch.cat([feat, onehot], dim=-1)
-    pred = model(graph, feat[:, :in_feats])
-    train_loss = cross_entropy(pred[train_idx], labels[train_idx])
-    val_loss = cross_entropy(pred[val_idx], labels[val_idx])
-    test_loss = cross_entropy(pred[test_idx], labels[test_idx])
-
+    pred = model(graph, feat)
     return (
-        compute_acc(pred[train_idx], labels[train_idx], evaluator),
-        compute_acc(pred[val_idx], labels[val_idx], evaluator),
-        compute_acc(pred[test_idx], labels[test_idx], evaluator),
-        train_loss,
-        val_loss,
-        test_loss,
-        pred
-    )
+        [compute_acc(pred[k], labels[train_idx], evaluator) for idx in [train_idx, val_idx, test_idx]] +
+        [cross_entropy(pred[k], labels[k]) for idx in [train_idx, val_idx, test_idx]])
 
 
 def main():
-    global device, in_feats, subgraph_size, n_classes, epsilon
-
     device = torch.device("cuda:0" if torch.cuda.is_available() else torch.device("cpu"))
     n_epochs = 100
     lr = 0.002
@@ -189,9 +173,8 @@ def main():
         loss, pred = train(model, graph, labels, train_idx, optimizer, use_labels)
         acc = compute_acc(pred[train_idx.clip(0, subgraph_size - 1) if subgraph_size else train_idx], labels[train_idx], evaluator)
 
-        train_acc, val_acc, test_acc, train_loss, val_loss, test_loss, out = evaluate(
-            model, graph, labels, train_idx, val_idx, test_idx, use_labels, evaluator
-        )
+        train_acc, val_acc, test_acc, train_loss, val_loss, test_loss = evaluate(
+            model, graph, labels, train_idx, val_idx, test_idx, use_labels, evaluator, device)
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
