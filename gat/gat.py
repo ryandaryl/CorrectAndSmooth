@@ -1,7 +1,4 @@
 import math
-import time
-import os
-import shutil
 import datetime
 
 import numpy as np
@@ -10,8 +7,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 import dgl.nn.pytorch as dglnn
-from matplotlib import pyplot as plt
-from matplotlib.ticker import AutoMinorLocator, MultipleLocator
 from ogb.nodeproppred import DglNodePropPredDataset, Evaluator
 
 n_classes = None
