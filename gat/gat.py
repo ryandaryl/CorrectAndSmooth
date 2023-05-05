@@ -14,7 +14,7 @@ from matplotlib import pyplot as plt
 from matplotlib.ticker import AutoMinorLocator, MultipleLocator
 from ogb.nodeproppred import DglNodePropPredDataset, Evaluator
 
-n_classes, subgraph_size = None, None
+n_classes = None
 epsilon = 1 - math.log(2)
 
 
@@ -96,10 +96,10 @@ def train(model, graph, labels, train_idx, optimizer, use_labels):
 
         train_pred_idx = train_idx[mask]
     optimizer.zero_grad()
-    pred = model(graph.subgraph(range(subgraph_size)) if subgraph_size else graph, feat[:subgraph_size])
+    pred = model(graph, feat)
     loss = cross_entropy(
-        pred[train_pred_idx.clip(0, subgraph_size - 1) if subgraph_size else train_pred_idx][:subgraph_size],
-        labels[train_pred_idx][:subgraph_size])
+        pred[train_pred_idx],
+        labels[train_pred_idx])
     loss.backward()
     optimizer.step()
 
@@ -144,7 +144,6 @@ def main():
 
     in_feats = graph.ndata["feat"].shape[1]
     n_classes = (labels.max() + 1).item()
-    subgraph_size = None
 
     model = GCN(
         in_feats=in_feats,
@@ -171,7 +170,7 @@ def main():
                 param_group["lr"] = lr * epoch / 50
 
         loss, pred = train(model, graph, labels, train_idx, optimizer, use_labels)
-        acc = compute_acc(pred[train_idx.clip(0, subgraph_size - 1) if subgraph_size else train_idx], labels[train_idx], evaluator)
+        acc = compute_acc(pred[train_idx], labels[train_idx], evaluator)
 
         train_acc, val_acc, test_acc, train_loss, val_loss, test_loss = evaluate(
             model, graph, labels, train_idx, val_idx, test_idx, use_labels, evaluator, device)
