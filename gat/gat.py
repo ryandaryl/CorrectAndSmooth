@@ -8,18 +8,25 @@ import torch.nn.functional as F
 import torch.optim as optim
 import dgl.nn.pytorch as dglnn
 from ogb.nodeproppred import DglNodePropPredDataset, Evaluator
+import pytorch_lightning as pl
 
 n_classes = None
 epsilon = 1 - math.log(2)
 
 
-class GCN(nn.Module):
-    def __init__(self, in_feats, n_hidden, n_classes, n_layers, activation, dropout, use_linear):
+class GCN(pl.LightningModule):
+    def __init__(self, in_feats, n_hidden, n_classes, n_layers, activation,
+            dropout, use_linear, use_labels, train_idx, val_idx, test_idx, evaluator):
         super().__init__()
         self.n_layers = n_layers
         self.n_hidden = n_hidden
         self.n_classes = n_classes
         self.use_linear = use_linear
+        self.use_labels = use_labels
+        self.train_idx = train_idx
+        self.val_idx = val_idx
+        self.test_idx = test_idx
+        self.evaluator = evaluator
 
         self.convs = nn.ModuleList()
         if use_linear:
@@ -61,6 +68,45 @@ class GCN(nn.Module):
 
         return h
 
+    def configure_optimizers(self):
+         return optim.RMSprop(self.parameters(), lr=0.002, weight_decay=0)
+
+
+    def training_step(self, batch, batch_idx):
+        graph, labels = batch[0]
+        feat = graph.ndata["feat"]
+        if self.use_labels:
+            mask_rate = 0.5
+            mask = torch.rand(self.train_idx.shape) < mask_rate
+            train_labels_idx = self.train_idx[mask]
+            train_pred_idx = self.train_idx[~mask]
+            feat = add_labels(feat, labels, train_labels_idx)
+        else:
+            mask_rate = 0.5
+            mask = torch.rand(self.train_idx.shape) < mask_rate
+            train_pred_idx = self.train_idx[mask]
+        pred = self(graph, feat)
+        loss = cross_entropy(
+            pred[train_pred_idx],
+            labels[train_pred_idx])
+        return loss
+
+
+    def validation_step(self, batch, batch_idx):
+        graph, labels = batch[0]
+        feat = graph.ndata["feat"]
+        if self.use_labels:
+            onehot = torch.zeros([feat.shape[0], self.n_classes]).to(device)
+            onehot[self.train_idx, labels[self.train_idx, 0]] = 1
+            feat = torch.cat([feat, onehot], dim=-1)
+        pred = self(graph, feat)
+        # ([compute_acc(pred[idx], labels[idx], evaluator) for idx in [self.train_idx, self.val_idx, self.test_idx]] +
+        # [cross_entropy(pred[idx], labels[idx]) for idx in [self.train_idx, self.val_idx, self.test_idx]])
+        loss = cross_entropy(
+            pred[self.val_idx],
+            labels[self.val_idx])
+        return loss
+
 
 def cross_entropy(x, labels):
     y = F.cross_entropy(x, labels[:, 0], reduction="none")
@@ -72,56 +118,11 @@ def compute_acc(pred, labels, evaluator):
     return evaluator.eval({"y_pred": pred.argmax(dim=-1, keepdim=True), "y_true": labels})["acc"]
 
 
-def train(model, graph, labels, train_idx, optimizer, use_labels):
-    model.train()
-
-    feat = graph.ndata["feat"]
-
-    if use_labels:
-        mask_rate = 0.5
-        mask = torch.rand(train_idx.shape) < mask_rate
-
-        train_labels_idx = train_idx[mask]
-        train_pred_idx = train_idx[~mask]
-
-        feat = add_labels(feat, labels, train_labels_idx)
-    else:
-        mask_rate = 0.5
-        mask = torch.rand(train_idx.shape) < mask_rate
-
-        train_pred_idx = train_idx[mask]
-    optimizer.zero_grad()
-    pred = model(graph, feat)
-    loss = cross_entropy(
-        pred[train_pred_idx],
-        labels[train_pred_idx])
-    loss.backward()
-    optimizer.step()
-
-    return loss, pred
-
-
-@torch.no_grad()
-def evaluate(model, graph, labels, train_idx, val_idx, test_idx, use_labels, evaluator, device):
-    model.eval()
-    feat = graph.ndata["feat"]
-    if use_labels:
-        onehot = torch.zeros([feat.shape[0], n_classes]).to(device)
-        onehot[train_idx, labels[train_idx, 0]] = 1
-        feat = torch.cat([feat, onehot], dim=-1)
-    pred = model(graph, feat)
-    return (
-        [compute_acc(pred[idx], labels[idx], evaluator) for idx in [train_idx, val_idx, test_idx]] +
-        [cross_entropy(pred[idx], labels[idx]) for idx in [train_idx, val_idx, test_idx]])
-
-
 def main():
     device = torch.device("cuda:0" if torch.cuda.is_available() else torch.device("cpu"))
     n_epochs = 100
-    lr = 0.002
     n_layers = 3
     use_labels = False
-    weight_decay = 0
     n_hidden = 256
     dropout = 0.75
 
@@ -131,6 +132,7 @@ def main():
     split_idx = data.get_idx_split()
     train_idx, val_idx, test_idx = [split_idx[k].to(device) for k in ["train", "valid", "test"]]
     graph, labels = [tensor_data.to(device) for tensor_data in data[0]]
+    dataloader = torch.utils.data.DataLoader([(graph, labels)], collate_fn=lambda data: data)
 
     srcs, dsts = graph.all_edges()
     graph.add_edges(dsts, srcs)
@@ -148,21 +150,35 @@ def main():
         activation=F.relu,
         dropout=dropout,
         use_linear=False,
+        use_labels=use_labels,
+        train_idx=train_idx,
+        val_idx=val_idx,
+        test_idx=test_idx,
+        evaluator=evaluator,
     )
     print([np.prod(p.size()) for p in model.parameters() if p.requires_grad])
     print(sum([np.prod(p.size()) for p in model.parameters() if p.requires_grad]))
-    model = model.to(device)
 
-    optimizer = optim.RMSprop(model.parameters(), lr=lr, weight_decay=weight_decay)
+    trainer = pl.Trainer(
+        default_root_dir='../data',
+        callbacks=[],
+        accelerator="auto",
+        max_epochs=50,
+        #enable_progress_bar=False,
+        log_every_n_steps=1,
+    )
+    trainer.fit(model, dataloader, dataloader)
+
+    initial_learning_rate = model.optimizer.param_group["lr"]
 
     best_val_acc, best_test_acc, best_val_loss = 0, 0, float("inf")
 
-    for epoch in range(1, n_epochs + 1):
+    """for epoch in range(1, n_epochs + 1):
         start_time = datetime.datetime.now()
 
         if epoch <= 50:
-            for param_group in optimizer.param_groups:
-                param_group["lr"] = lr * epoch / 50
+            for param_group in model.optimizer.param_groups:
+                param_group["lr"] = initial_learning_rate * epoch / 50
 
         loss, pred = train(model, graph, labels, train_idx, optimizer, use_labels)
         acc = compute_acc(pred[train_idx], labels[train_idx], evaluator)
@@ -181,7 +197,7 @@ def main():
             f"Train/Val/Test loss: {train_loss:.4f}/{val_loss:.4f}/{test_loss:.4f}\n"
             f"Train/Val/Test/Best val/Best test acc: {train_acc:.4f}/{val_acc:.4f}/{test_acc:.4f}/{best_val_acc:.4f}/{best_test_acc:.4f}"
         )
-        print(datetime.datetime.now() - start_time)
+        print(datetime.datetime.now() - start_time)"""
 
 
 if __name__ == "__main__":
