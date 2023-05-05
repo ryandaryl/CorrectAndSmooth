@@ -116,8 +116,8 @@ def evaluate(model, graph, labels, train_idx, val_idx, test_idx, use_labels, eva
         feat = torch.cat([feat, onehot], dim=-1)
     pred = model(graph, feat)
     return (
-        [compute_acc(pred[k], labels[train_idx], evaluator) for idx in [train_idx, val_idx, test_idx]] +
-        [cross_entropy(pred[k], labels[k]) for idx in [train_idx, val_idx, test_idx]])
+        [compute_acc(pred[idx], labels[idx], evaluator) for idx in [train_idx, val_idx, test_idx]] +
+        [cross_entropy(pred[idx], labels[idx]) for idx in [train_idx, val_idx, test_idx]])
 
 
 def main():
