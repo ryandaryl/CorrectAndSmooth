@@ -100,8 +100,11 @@ class GCN(pl.LightningModule):
             onehot[self.train_idx, labels[self.train_idx, 0]] = 1
             feat = torch.cat([feat, onehot], dim=-1)
         pred = self(graph, feat)
-        # ([compute_acc(pred[idx], labels[idx], evaluator) for idx in [self.train_idx, self.val_idx, self.test_idx]] +
-        # [cross_entropy(pred[idx], labels[idx]) for idx in [self.train_idx, self.val_idx, self.test_idx]])
+        self.log_dict({f'{stage}_acc': compute_acc(
+            pred[getattr(self, f'{stage}_idx')],
+            labels[getattr(self, f'{stage}_idx')],
+            self.evaluator
+        ) for stage in ['train', 'val', 'test']})
         loss = cross_entropy(
             pred[self.val_idx],
             labels[self.val_idx])
@@ -159,9 +162,14 @@ def main():
     print([np.prod(p.size()) for p in model.parameters() if p.requires_grad])
     print(sum([np.prod(p.size()) for p in model.parameters() if p.requires_grad]))
 
+    class PrintMetrics(pl.callbacks.Callback):
+
+        def on_epoch_end(self, trainer, *args):
+            print(trainer.logged_metrics)
+
     trainer = pl.Trainer(
         default_root_dir='../data',
-        callbacks=[],
+        callbacks=[PrintMetrics()],
         accelerator="auto",
         max_epochs=50,
         #enable_progress_bar=False,
