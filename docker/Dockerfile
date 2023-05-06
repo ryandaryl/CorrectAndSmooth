@@ -18,3 +18,5 @@ RUN wget https://julialang-s3.julialang.org/bin/linux/x64/1.8/julia-1.8.5-linux-
 RUN ln -s /opt/julia-1.8.5/bin/julia /usr/bin/julia \
 	&& julia -e 'import Pkg; Pkg.add("LinearMaps"); Pkg.add("MAT"); Pkg.add("Arpack")'
 RUN python -m pip install dgl==0.5.3
+RUN python -m pip install pytorch_lightning==1.5.0 torchmetrics==0.5.1 --no-deps --upgrade
+RUN python -m pip install pyDeprecate==0.3.1 future tensorboard fsspec --upgrade
