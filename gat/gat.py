@@ -71,54 +71,42 @@ class GCN(pl.LightningModule):
     def configure_optimizers(self):
          return optim.RMSprop(self.parameters(), lr=0.002, weight_decay=0)
 
-
-    def training_step(self, batch, batch_idx):
+    def _step(self, batch, batch_idx, pred_idx, mask_rate=None, log_metrics=False):
         graph, labels = batch[0]
         feat = graph.ndata["feat"]
-        if self.use_labels:
-            mask_rate = 0.5
-            mask = torch.rand(self.train_idx.shape) < mask_rate
-            train_labels_idx = self.train_idx[mask]
-            train_pred_idx = self.train_idx[~mask]
-            feat = add_labels(feat, labels, train_labels_idx)
-        else:
-            mask_rate = 0.5
-            mask = torch.rand(self.train_idx.shape) < mask_rate
-            train_pred_idx = self.train_idx[mask]
-        pred = self(graph, feat)
-        loss = cross_entropy(
-            pred[train_pred_idx],
-            labels[train_pred_idx])
-        return loss
-
-
-    def validation_step(self, batch, batch_idx):
-        graph, labels = batch[0]
-        feat = graph.ndata["feat"]
+        train_labels_idx = self.train_idx
+        if mask_rate is not None:
+            mask = torch.rand(pred_idx.shape) < mask_rate
+            labels_idx = pred_idx[mask]
+            pred_idx = pred_idx[~mask]
         if self.use_labels:
             onehot = torch.zeros([feat.shape[0], self.n_classes]).to(device)
-            onehot[self.train_idx, labels[self.train_idx, 0]] = 1
+            onehot[pred_idx, labels[labels_idx, 0]] = 1
             feat = torch.cat([feat, onehot], dim=-1)
         pred = self(graph, feat)
-        self.log_dict({f'{stage}_acc': compute_acc(
-            pred[getattr(self, f'{stage}_idx')],
-            labels[getattr(self, f'{stage}_idx')],
-            self.evaluator
-        ) for stage in ['train', 'val', 'test']})
+        if log_metrics:
+            for stage in ['train', 'val', 'test']:
+                idx = getattr(self, f'{stage}_idx')
+                accuracy = self.evaluator.eval({
+                    "y_pred": pred[idx].argmax(dim=-1, keepdim=True),
+                    "y_true": labels[idx]})["acc"]
+                self.log(f'{stage}_acc', accuracy)
         loss = cross_entropy(
-            pred[self.val_idx],
-            labels[self.val_idx])
+            pred[pred_idx],
+            labels[pred_idx])
         return loss
+
+    def training_step(self, batch, batch_idx):
+        return self._step(batch, batch_idx, self.train_idx, mask_rate=0.5)
+
+    def validation_step(self, batch, batch_idx):
+        return self._step(batch, batch_idx, self.val_idx, log_metrics=True)
 
 
 def cross_entropy(x, labels):
     y = F.cross_entropy(x, labels[:, 0], reduction="none")
     y = torch.log(epsilon + y) - math.log(epsilon)
     return torch.mean(y)
-
-
-def compute_acc(pred, labels, evaluator):
-    return evaluator.eval({"y_pred": pred.argmax(dim=-1, keepdim=True), "y_true": labels})["acc"]
 
 
 def main():
