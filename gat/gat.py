@@ -71,7 +71,6 @@ class GCN(pl.LightningModule):
     def configure_optimizers(self):
          return optim.RMSprop(self.parameters(), lr=0.002, weight_decay=0)
 
-
     def training_step(self, batch, batch_idx):
         graph, labels = batch[0]
         feat = graph.ndata["feat"]
@@ -91,14 +90,11 @@ class GCN(pl.LightningModule):
             labels[train_pred_idx])
         return loss
 
-
     def validation_step(self, batch, batch_idx):
         graph, labels = batch[0]
         feat = graph.ndata["feat"]
         if self.use_labels:
-            onehot = torch.zeros([feat.shape[0], self.n_classes]).to(device)
-            onehot[self.train_idx, labels[self.train_idx, 0]] = 1
-            feat = torch.cat([feat, onehot], dim=-1)
+            feat = add_labels(feat, labels, self.train_idx)
         pred = self(graph, feat)
         self.log_dict({f'{stage}_acc': compute_acc(
             pred[getattr(self, f'{stage}_idx')],
@@ -109,6 +105,12 @@ class GCN(pl.LightningModule):
             pred[self.val_idx],
             labels[self.val_idx])
         return loss
+
+
+def add_labels(feat, labels, idx):
+    onehot = th.zeros([feat.shape[0], n_classes]).to(device)
+    onehot[idx, labels[idx, 0]] = 1
+    return th.cat([feat, onehot], dim=-1)
 
 
 def cross_entropy(x, labels):
