@@ -20,22 +20,14 @@ class GCN(pl.LightningModule):
         activation,
         dropout,
         use_linear,
-        use_labels,
-        train_idx,
-        val_idx,
-        test_idx,
-        evaluator,
+        accuracy=None,
     ):
         super().__init__()
         self.n_layers = n_layers
         self.n_hidden = n_hidden
         self.n_classes = n_classes
         self.use_linear = use_linear
-        self.use_labels = use_labels
-        self.train_idx = train_idx
-        self.val_idx = val_idx
-        self.test_idx = test_idx
-        self.evaluator = evaluator
+        self.accuracy = accuracy
 
         self.convs = nn.ModuleList()
         if use_linear:
@@ -81,40 +73,65 @@ class GCN(pl.LightningModule):
         return optim.RMSprop(self.parameters(), lr=0.002, weight_decay=0)
 
     def training_step(self, batch, batch_idx):
-        graph, labels = batch[0]
-        feat = graph.ndata["feat"]
-        if self.use_labels:
-            mask_rate = 0.5
-            mask = torch.rand(self.train_idx.shape) < mask_rate
-            train_labels_idx = self.train_idx[mask]
-            train_pred_idx = self.train_idx[~mask]
-            feat = add_labels(feat, labels, train_labels_idx, self.n_classes)
-        else:
-            mask_rate = 0.5
-            mask = torch.rand(self.train_idx.shape) < mask_rate
-            train_pred_idx = self.train_idx[mask]
+        graph, feat, labels, idx = batch[0]
         pred = self(graph, feat)
-        loss = cross_entropy(pred[train_pred_idx], labels[train_pred_idx])
+        loss = cross_entropy(pred[idx], labels[idx])
         return loss
 
     def validation_step(self, batch, batch_idx):
-        graph, labels = batch[0]
-        feat = graph.ndata["feat"]
-        if self.use_labels:
-            feat = add_labels(feat, labels, self.train_idx, self.n_classes)
+        graph, feat, labels, idx = batch[0]
         pred = self(graph, feat)
-        self.log_dict(
-            {
-                f"{stage}_acc": compute_acc(
-                    pred[getattr(self, f"{stage}_idx")],
-                    labels[getattr(self, f"{stage}_idx")],
-                    self.evaluator,
-                )
-                for stage in ["train", "val", "test"]
-            }
-        )
-        loss = cross_entropy(pred[self.val_idx], labels[self.val_idx])
+        if self.accuracy:
+            self.log_dict(self.accuracy(pred, labels, idx))
+        loss = cross_entropy(pred[idx], labels[idx])
         return loss
+
+
+class DataModule(pl.LightningDataModule):
+    def __init__(self, ogbn_name, mask_rate=0.5, use_labels=False):
+        super().__init__()
+        self.mask_rate = mask_rate
+        self.ogbn_name = ogbn_name
+        self.use_labels = use_labels
+        self.graph = None
+        self.labels = None
+        data = DglNodePropPredDataset(name=self.ogbn_name)
+        split_idx = data.get_idx_split()
+        self.train_idx = split_idx["train"]
+        self.val_idx = split_idx["valid"]
+        self.test_idx = split_idx["test"]
+        self.n_classes = int(data.num_classes)
+
+    def setup(self, stage):
+        data = DglNodePropPredDataset(name=self.ogbn_name)
+        graph, labels = data[0]
+        srcs, dsts = graph.all_edges()
+        graph.add_edges(dsts, srcs)
+        graph = graph.remove_self_loop().add_self_loop()
+        print(f"Total edges after adding self-loop {graph.number_of_edges()}")
+        self.graph = graph
+        self.labels = labels
+
+    def train_dataloader(self):
+        feat = self.graph.ndata["feat"]
+        mask = torch.rand(self.train_idx.shape) < self.mask_rate
+        train_labels_idx = self.train_idx[~mask]
+        train_pred_idx = self.train_idx[mask]
+        if self.use_labels:
+            feat = add_labels(feat, self.labels, train_labels_idx, self.n_classes)
+        return torch.utils.data.DataLoader(
+            [(self.graph, feat, self.labels, train_pred_idx)],
+            collate_fn=lambda data: data,
+        )
+
+    def val_dataloader(self):
+        feat = self.graph.ndata["feat"]
+        if self.use_labels:
+            feat = add_labels(feat, self.labels, self.train_idx)
+        return torch.utils.data.DataLoader(
+            [(self.graph, feat, self.labels, self.val_idx)],
+            collate_fn=lambda data: data,
+        )
 
 
 def add_labels(feat, labels, idx, n_classes):
@@ -137,34 +154,26 @@ def compute_acc(pred, labels, evaluator):
 
 
 def main():
-    device = torch.device(
-        "cuda:0" if torch.cuda.is_available() else torch.device("cpu")
-    )
     n_epochs = 100
     n_layers = 3
-    use_labels = False
     n_hidden = 256
     dropout = 0.75
 
-    data = DglNodePropPredDataset(name="ogbn-arxiv")
-    evaluator = Evaluator(name="ogbn-arxiv")
-
-    split_idx = data.get_idx_split()
-    train_idx, val_idx, test_idx = [
-        split_idx[k].to(device) for k in ["train", "valid", "test"]
-    ]
-    graph, labels = [tensor_data.to(device) for tensor_data in data[0]]
-    dataloader = torch.utils.data.DataLoader(
-        [(graph, labels)], collate_fn=lambda data: data
-    )
-
-    srcs, dsts = graph.all_edges()
-    graph.add_edges(dsts, srcs)
-    graph = graph.remove_self_loop().add_self_loop()
-    print(f"Total edges after adding self-loop {graph.number_of_edges()}")
-
+    datamodule = DataModule("ogbn-arxiv")
+    data = DglNodePropPredDataset("ogbn-arxiv")
+    graph, labels = data[0]
     in_feats = graph.ndata["feat"].shape[1]
     n_classes = (labels.max() + 1).item()
+
+    evaluator = Evaluator(name="ogbn-arxiv")
+    accuracy = lambda pred, labels, idx: {
+        f"{stage}_acc": compute_acc(
+            pred[getattr(datamodule, f"{stage}_idx")],
+            labels[getattr(datamodule, f"{stage}_idx")],
+            evaluator,
+        )
+        for stage in ["train", "val", "test"]
+    }
 
     model = GCN(
         in_feats=in_feats,
@@ -174,11 +183,7 @@ def main():
         activation=F.relu,
         dropout=dropout,
         use_linear=False,
-        use_labels=use_labels,
-        train_idx=train_idx,
-        val_idx=val_idx,
-        test_idx=test_idx,
-        evaluator=evaluator,
+        accuracy=accuracy,
     )
     print([np.prod(p.size()) for p in model.parameters() if p.requires_grad])
     print(sum([np.prod(p.size()) for p in model.parameters() if p.requires_grad]))
@@ -194,7 +199,7 @@ def main():
         max_epochs=n_epochs,
         log_every_n_steps=1,
     )
-    trainer.fit(model, dataloader, dataloader)
+    trainer.fit(model, datamodule=datamodule)
 
     initial_learning_rate = model.optimizer.param_group["lr"]
 
