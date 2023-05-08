@@ -192,7 +192,6 @@ def main():
         callbacks=[PrintMetrics()],
         accelerator="auto",
         max_epochs=n_epochs,
-        # enable_progress_bar=False,
         log_every_n_steps=1,
     )
     trainer.fit(model, dataloader, dataloader)
