@@ -1,5 +1,4 @@
 import math
-import datetime
 
 import numpy as np
 import torch
@@ -9,9 +8,6 @@ import torch.optim as optim
 import dgl.nn.pytorch as dglnn
 from ogb.nodeproppred import DglNodePropPredDataset, Evaluator
 import pytorch_lightning as pl
-
-n_classes = None
-epsilon = 1 - math.log(2)
 
 
 class GCN(pl.LightningModule):
@@ -114,6 +110,7 @@ def add_labels(feat, labels, idx):
 
 
 def cross_entropy(x, labels):
+    epsilon = 1 - math.log(2)
     y = F.cross_entropy(x, labels[:, 0], reduction="none")
     y = torch.log(epsilon + y) - math.log(epsilon)
     return torch.mean(y)
