@@ -11,8 +11,21 @@ import pytorch_lightning as pl
 
 
 class GCN(pl.LightningModule):
-    def __init__(self, in_feats, n_hidden, n_classes, n_layers, activation,
-            dropout, use_linear, use_labels, train_idx, val_idx, test_idx, evaluator):
+    def __init__(
+        self,
+        in_feats,
+        n_hidden,
+        n_classes,
+        n_layers,
+        activation,
+        dropout,
+        use_linear,
+        use_labels,
+        train_idx,
+        val_idx,
+        test_idx,
+        evaluator,
+    ):
         super().__init__()
         self.n_layers = n_layers
         self.n_hidden = n_hidden
@@ -65,7 +78,7 @@ class GCN(pl.LightningModule):
         return h
 
     def configure_optimizers(self):
-         return optim.RMSprop(self.parameters(), lr=0.002, weight_decay=0)
+        return optim.RMSprop(self.parameters(), lr=0.002, weight_decay=0)
 
     def training_step(self, batch, batch_idx):
         graph, labels = batch[0]
@@ -81,9 +94,7 @@ class GCN(pl.LightningModule):
             mask = torch.rand(self.train_idx.shape) < mask_rate
             train_pred_idx = self.train_idx[mask]
         pred = self(graph, feat)
-        loss = cross_entropy(
-            pred[train_pred_idx],
-            labels[train_pred_idx])
+        loss = cross_entropy(pred[train_pred_idx], labels[train_pred_idx])
         return loss
 
     def validation_step(self, batch, batch_idx):
@@ -92,14 +103,17 @@ class GCN(pl.LightningModule):
         if self.use_labels:
             feat = add_labels(feat, labels, self.train_idx)
         pred = self(graph, feat)
-        self.log_dict({f'{stage}_acc': compute_acc(
-            pred[getattr(self, f'{stage}_idx')],
-            labels[getattr(self, f'{stage}_idx')],
-            self.evaluator
-        ) for stage in ['train', 'val', 'test']})
-        loss = cross_entropy(
-            pred[self.val_idx],
-            labels[self.val_idx])
+        self.log_dict(
+            {
+                f"{stage}_acc": compute_acc(
+                    pred[getattr(self, f"{stage}_idx")],
+                    labels[getattr(self, f"{stage}_idx")],
+                    self.evaluator,
+                )
+                for stage in ["train", "val", "test"]
+            }
+        )
+        loss = cross_entropy(pred[self.val_idx], labels[self.val_idx])
         return loss
 
 
@@ -117,11 +131,15 @@ def cross_entropy(x, labels):
 
 
 def compute_acc(pred, labels, evaluator):
-    return evaluator.eval({"y_pred": pred.argmax(dim=-1, keepdim=True), "y_true": labels})["acc"]
+    return evaluator.eval(
+        {"y_pred": pred.argmax(dim=-1, keepdim=True), "y_true": labels}
+    )["acc"]
 
 
 def main():
-    device = torch.device("cuda:0" if torch.cuda.is_available() else torch.device("cpu"))
+    device = torch.device(
+        "cuda:0" if torch.cuda.is_available() else torch.device("cpu")
+    )
     n_epochs = 100
     n_layers = 3
     use_labels = False
@@ -132,9 +150,13 @@ def main():
     evaluator = Evaluator(name="ogbn-arxiv")
 
     split_idx = data.get_idx_split()
-    train_idx, val_idx, test_idx = [split_idx[k].to(device) for k in ["train", "valid", "test"]]
+    train_idx, val_idx, test_idx = [
+        split_idx[k].to(device) for k in ["train", "valid", "test"]
+    ]
     graph, labels = [tensor_data.to(device) for tensor_data in data[0]]
-    dataloader = torch.utils.data.DataLoader([(graph, labels)], collate_fn=lambda data: data)
+    dataloader = torch.utils.data.DataLoader(
+        [(graph, labels)], collate_fn=lambda data: data
+    )
 
     srcs, dsts = graph.all_edges()
     graph.add_edges(dsts, srcs)
@@ -162,16 +184,15 @@ def main():
     print(sum([np.prod(p.size()) for p in model.parameters() if p.requires_grad]))
 
     class PrintMetrics(pl.callbacks.Callback):
-
         def on_epoch_end(self, trainer, *args):
             print(trainer.logged_metrics)
 
     trainer = pl.Trainer(
-        default_root_dir='../data',
+        default_root_dir="../data",
         callbacks=[PrintMetrics()],
         accelerator="auto",
         max_epochs=n_epochs,
-        #enable_progress_bar=False,
+        # enable_progress_bar=False,
         log_every_n_steps=1,
     )
     trainer.fit(model, dataloader, dataloader)
@@ -179,6 +200,7 @@ def main():
     initial_learning_rate = model.optimizer.param_group["lr"]
 
     best_val_acc, best_test_acc, best_val_loss = 0, 0, float("inf")
+
 
 if __name__ == "__main__":
     main()
