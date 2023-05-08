@@ -108,9 +108,9 @@ class GCN(pl.LightningModule):
 
 
 def add_labels(feat, labels, idx):
-    onehot = th.zeros([feat.shape[0], n_classes]).to(device)
+    onehot = torch.zeros([feat.shape[0], n_classes])
     onehot[idx, labels[idx, 0]] = 1
-    return th.cat([feat, onehot], dim=-1)
+    return torch.cat([feat, onehot], dim=-1)
 
 
 def cross_entropy(x, labels):
