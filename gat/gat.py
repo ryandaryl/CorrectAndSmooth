@@ -88,7 +88,7 @@ class GCN(pl.LightningModule):
             mask = torch.rand(self.train_idx.shape) < mask_rate
             train_labels_idx = self.train_idx[mask]
             train_pred_idx = self.train_idx[~mask]
-            feat = add_labels(feat, labels, train_labels_idx)
+            feat = add_labels(feat, labels, train_labels_idx, self.n_classes)
         else:
             mask_rate = 0.5
             mask = torch.rand(self.train_idx.shape) < mask_rate
@@ -101,7 +101,7 @@ class GCN(pl.LightningModule):
         graph, labels = batch[0]
         feat = graph.ndata["feat"]
         if self.use_labels:
-            feat = add_labels(feat, labels, self.train_idx)
+            feat = add_labels(feat, labels, self.train_idx, self.n_classes)
         pred = self(graph, feat)
         self.log_dict(
             {
@@ -117,7 +117,7 @@ class GCN(pl.LightningModule):
         return loss
 
 
-def add_labels(feat, labels, idx):
+def add_labels(feat, labels, idx, n_classes):
     onehot = torch.zeros([feat.shape[0], n_classes])
     onehot[idx, labels[idx, 0]] = 1
     return torch.cat([feat, onehot], dim=-1)
