@@ -201,10 +201,5 @@ def main():
     )
     trainer.fit(model, datamodule=datamodule)
 
-    initial_learning_rate = model.optimizer.param_group["lr"]
-
-    best_val_acc, best_test_acc, best_val_loss = 0, 0, float("inf")
-
-
 if __name__ == "__main__":
     main()
