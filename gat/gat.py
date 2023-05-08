@@ -173,7 +173,7 @@ def main():
         default_root_dir='../data',
         callbacks=[PrintMetrics()],
         accelerator="auto",
-        max_epochs=50,
+        max_epochs=n_epochs,
         #enable_progress_bar=False,
         log_every_n_steps=1,
     )
@@ -182,33 +182,6 @@ def main():
     initial_learning_rate = model.optimizer.param_group["lr"]
 
     best_val_acc, best_test_acc, best_val_loss = 0, 0, float("inf")
-
-    """for epoch in range(1, n_epochs + 1):
-        start_time = datetime.datetime.now()
-
-        if epoch <= 50:
-            for param_group in model.optimizer.param_groups:
-                param_group["lr"] = initial_learning_rate * epoch / 50
-
-        loss, pred = train(model, graph, labels, train_idx, optimizer, use_labels)
-        acc = compute_acc(pred[train_idx], labels[train_idx], evaluator)
-
-        train_acc, val_acc, test_acc, train_loss, val_loss, test_loss = evaluate(
-            model, graph, labels, train_idx, val_idx, test_idx, use_labels, evaluator, device)
-
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
-            best_val_acc = val_acc
-            best_test_acc = test_acc
-
-        print(
-            f"{epoch=}\n"
-            f"Loss: {loss.item():.4f}, Acc: {acc:.4f}\n"
-            f"Train/Val/Test loss: {train_loss:.4f}/{val_loss:.4f}/{test_loss:.4f}\n"
-            f"Train/Val/Test/Best val/Best test acc: {train_acc:.4f}/{val_acc:.4f}/{test_acc:.4f}/{best_val_acc:.4f}/{best_test_acc:.4f}"
-        )
-        print(datetime.datetime.now() - start_time)"""
-
 
 if __name__ == "__main__":
     main()
