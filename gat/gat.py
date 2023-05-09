@@ -82,7 +82,7 @@ class GCN(pl.LightningModule):
         graph, feat, labels, idx = batch[0]
         pred = self(graph, feat)
         if self.val_metric:
-            self.log_dict(self.val_metric(pred, labels, idx))
+            self.log_dict(self.val_metric(pred, labels, idx), prog_bar=True)
         loss = cross_entropy(pred[idx], labels[idx])
         return loss
 
@@ -188,18 +188,14 @@ def main():
     print([np.prod(p.size()) for p in model.parameters() if p.requires_grad])
     print(sum([np.prod(p.size()) for p in model.parameters() if p.requires_grad]))
 
-    class PrintMetrics(pl.callbacks.Callback):
-        def on_epoch_end(self, trainer, *args):
-            print(trainer.logged_metrics)
-
     trainer = pl.Trainer(
         default_root_dir="../data",
-        callbacks=[PrintMetrics()],
         accelerator="auto",
         max_epochs=n_epochs,
         log_every_n_steps=1,
     )
     trainer.fit(model, datamodule=datamodule)
+
 
 if __name__ == "__main__":
     main()
