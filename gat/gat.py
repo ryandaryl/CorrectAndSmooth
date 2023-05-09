@@ -20,14 +20,14 @@ class GCN(pl.LightningModule):
         activation,
         dropout,
         use_linear,
-        accuracy=None,
+        val_metric=None,
     ):
         super().__init__()
         self.n_layers = n_layers
         self.n_hidden = n_hidden
         self.n_classes = n_classes
         self.use_linear = use_linear
-        self.accuracy = accuracy
+        self.val_metric = val_metric
 
         self.convs = nn.ModuleList()
         if use_linear:
@@ -81,8 +81,8 @@ class GCN(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         graph, feat, labels, idx = batch[0]
         pred = self(graph, feat)
-        if self.accuracy:
-            self.log_dict(self.accuracy(pred, labels, idx))
+        if self.val_metric:
+            self.log_dict(self.val_metric(pred, labels, idx))
         loss = cross_entropy(pred[idx], labels[idx])
         return loss
 
@@ -183,7 +183,7 @@ def main():
         activation=F.relu,
         dropout=dropout,
         use_linear=False,
-        accuracy=accuracy,
+        val_metric=accuracy,
     )
     print([np.prod(p.size()) for p in model.parameters() if p.requires_grad])
     print(sum([np.prod(p.size()) for p in model.parameters() if p.requires_grad]))
