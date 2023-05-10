@@ -285,7 +285,9 @@ class GAT(pl.LightningModule):
         return h
 
     def configure_optimizers(self):
-        return optim.RMSprop(self.parameters(), lr=0.002, weight_decay=0)
+        optimizer = optim.RMSprop(self.parameters(), lr=0.002, weight_decay=0)
+        return ([optimizer],
+                [optim.lr_scheduler.LinearLR(optimizer, start_factor=1/50)])
 
     def training_step(self, batch, batch_idx):
         graph, feat, labels, idx = batch[0]
