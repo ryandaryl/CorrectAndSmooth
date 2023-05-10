@@ -181,7 +181,7 @@ def main():
     }
 
     """model = GCN(
-        in_feats=in_feats,
+        in_feats=in_feats + n_classes,
         n_classes=n_classes,
         n_hidden=n_hidden,
         n_layers=n_layers,
