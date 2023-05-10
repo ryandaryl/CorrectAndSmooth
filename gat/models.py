@@ -1,3 +1,4 @@
+import math
 import dgl.nn.pytorch as dglnn
 import torch
 import torch.nn as nn
@@ -8,6 +9,7 @@ from dgl.ops import edge_softmax
 from dgl.utils import expand_as_pair
 import pytorch_lightning as pl
 import torch.optim as optim
+import torch.nn.functional as F
 
 
 class Bias(nn.Module):
@@ -151,7 +153,7 @@ class GATConv(nn.Module):
 
 class GAT(pl.LightningModule):
     def __init__(
-        self, in_feats, n_classes, n_hidden, n_layers, n_heads, activation, dropout=0.0, attn_drop=0.0, norm="none"
+        self, in_feats, n_classes, n_hidden, n_layers, n_heads, activation, dropout=0.0, attn_drop=0.0, norm="none", val_metric=None,
     ):
         super().__init__()
         self.in_feats = in_feats
@@ -159,6 +161,7 @@ class GAT(pl.LightningModule):
         self.n_classes = n_classes
         self.n_layers = n_layers
         self.num_heads = n_heads
+        self.val_metric = val_metric
 
         self.convs = nn.ModuleList()
         self.linear = nn.ModuleList()
@@ -220,3 +223,22 @@ class GAT(pl.LightningModule):
             self.log_dict(self.val_metric(pred, labels, idx), prog_bar=True)
         loss = cross_entropy(pred[idx], labels[idx])
         return loss
+
+
+def add_labels(feat, labels, idx, n_classes):
+    onehot = torch.zeros([feat.shape[0], n_classes])
+    onehot[idx, labels[idx, 0]] = 1
+    return torch.cat([feat, onehot], dim=-1)
+
+
+def cross_entropy(x, labels):
+    epsilon = 1 - math.log(2)
+    y = F.cross_entropy(x, labels[:, 0], reduction="none")
+    y = torch.log(epsilon + y) - math.log(epsilon)
+    return torch.mean(y)
+
+
+def compute_acc(pred, labels, evaluator):
+    return evaluator.eval(
+        {"y_pred": pred.argmax(dim=-1, keepdim=True), "y_true": labels}
+    )["acc"]

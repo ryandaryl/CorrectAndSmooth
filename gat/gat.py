@@ -200,6 +200,7 @@ def main():
         dropout=dropout,
         attn_drop=attn_drop,
         norm=norm,
+        val_metric=accuracy,
     )
     print([np.prod(p.size()) for p in model.parameters() if p.requires_grad])
     print(sum([np.prod(p.size()) for p in model.parameters() if p.requires_grad]))
