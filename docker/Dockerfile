@@ -11,7 +11,7 @@ RUN cp Python-${PYTHON_VERSION}/python /usr/bin
 RUN python -m pip install torch==2.0.1+cpu torchvision==0.15.2+cpu torchaudio==2.0.2 -f https://download.pytorch.org/whl/cpu
 RUN python -m pip install torch_geometric==2.3.1 torch_scatter==2.1.1 torch_sparse==0.6.17 \
     torch_cluster==1.6.1 torch_spline_conv==1.2.2
-RUN python -m pip install ogb==1.3.6 julia optuna dgl==1.1.0 pytorch_lightning==2.0.2
+RUN python -m pip install ogb==1.3.6 julia optuna dgl==1.1.0 pytorch_lightning==2.0.2 # -f https://data.dgl.ai/wheels/cu118/repo.html
 RUN wget https://julialang-s3.julialang.org/bin/linux/x64/1.8/julia-1.8.5-linux-x86_64.tar.gz \
     && tar zxvf julia-1.8.5-linux-x86_64.tar.gz
 RUN ln -s /opt/julia-1.8.5/bin/julia /usr/bin/julia \
