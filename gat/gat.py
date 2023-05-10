@@ -9,6 +9,8 @@ import dgl.nn.pytorch as dglnn
 from ogb.nodeproppred import DglNodePropPredDataset, Evaluator
 import pytorch_lightning as pl
 
+from models import GAT
+
 
 class GCN(pl.LightningModule):
     def __init__(
@@ -127,7 +129,7 @@ class DataModule(pl.LightningDataModule):
     def val_dataloader(self):
         feat = self.graph.ndata["feat"]
         if self.use_labels:
-            feat = add_labels(feat, self.labels, self.train_idx)
+            feat = add_labels(feat, self.labels, self.train_idx, self.n_classes)
         return torch.utils.data.DataLoader(
             [(self.graph, feat, self.labels, self.val_idx)],
             collate_fn=lambda data: data,
@@ -157,9 +159,12 @@ def main():
     n_epochs = 100
     n_layers = 3
     n_hidden = 256
+    n_heads = 3
     dropout = 0.75
+    attn_drop = 0.05
+    norm = "none" # "both"
 
-    datamodule = DataModule("ogbn-arxiv")
+    datamodule = DataModule("ogbn-arxiv", use_labels=True)
     data = DglNodePropPredDataset("ogbn-arxiv")
     graph, labels = data[0]
     in_feats = graph.ndata["feat"].shape[1]
@@ -175,7 +180,7 @@ def main():
         for stage in ["train", "val", "test"]
     }
 
-    model = GCN(
+    """model = GCN(
         in_feats=in_feats,
         n_classes=n_classes,
         n_hidden=n_hidden,
@@ -184,6 +189,17 @@ def main():
         dropout=dropout,
         use_linear=False,
         val_metric=accuracy,
+    )"""
+    model = GAT(
+        in_feats + n_classes,
+        n_classes,
+        n_hidden=n_hidden,
+        n_layers=n_layers,
+        n_heads=n_heads,
+        activation=F.relu,
+        dropout=dropout,
+        attn_drop=attn_drop,
+        norm=norm,
     )
     print([np.prod(p.size()) for p in model.parameters() if p.requires_grad])
     print(sum([np.prod(p.size()) for p in model.parameters() if p.requires_grad]))

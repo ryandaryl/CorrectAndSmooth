@@ -6,6 +6,8 @@ from dgl._ffi.base import DGLError
 from dgl.nn.pytorch.utils import Identity
 from dgl.ops import edge_softmax
 from dgl.utils import expand_as_pair
+import pytorch_lightning as pl
+import torch.optim as optim
 
 
 class Bias(nn.Module):
@@ -147,7 +149,7 @@ class GATConv(nn.Module):
             return rst
 
 
-class GAT(nn.Module):
+class GAT(pl.LightningModule):
     def __init__(
         self, in_feats, n_classes, n_hidden, n_layers, n_heads, activation, dropout=0.0, attn_drop=0.0, norm="none"
     ):
@@ -201,3 +203,20 @@ class GAT(nn.Module):
         h = self.bias_last(h)
 
         return h
+
+    def configure_optimizers(self):
+        return optim.RMSprop(self.parameters(), lr=0.002, weight_decay=0)
+
+    def training_step(self, batch, batch_idx):
+        graph, feat, labels, idx = batch[0]
+        pred = self(graph, feat)
+        loss = cross_entropy(pred[idx], labels[idx])
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        graph, feat, labels, idx = batch[0]
+        pred = self(graph, feat)
+        if self.val_metric:
+            self.log_dict(self.val_metric(pred, labels, idx), prog_bar=True)
+        loss = cross_entropy(pred[idx], labels[idx])
+        return loss
